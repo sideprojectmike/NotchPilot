@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key><string>NotchPilot</string>
+  <key>CFBundleIdentifier</key><string>com.sideprojectmike.notchpilot</string>
+  <key>CFBundleName</key><string>NotchPilot</string>
+  <key>CFBundleDisplayName</key><string>NotchPilot</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+  <key>LSUIElement</key><true/>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSHumanReadableCopyright</key><string>© 2026 Michael Raso</string>
+  <key>NSMicrophoneUsageDescription</key><string>NotchPilot listens only while you have the mic button on, so it can hear the question you were asked.</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>NotchPilot turns what it hears into text on your Mac before sending the question to your AI.</string>
+</dict>
+</plist>
