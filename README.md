@@ -12,7 +12,12 @@ An AI copilot that lives in your Mac's notch. Hover the notch, tap the camera or
 Works with OpenAI, Anthropic, Google Gemini, any OpenAI-compatible API (Groq, OpenRouter, Ollama), or your Claude subscription through Claude Code.
 
 ## Screen sharing
-NotchPilot keeps itself out of the screenshots it takes. On macOS 15 and later, Apple gives apps no way to hide a window from screen-sharing apps like Zoom and Google Meet, so **if you share your entire screen, others can see NotchPilot.** Share a single window or tab instead.
+NotchPilot marks its windows as private, so screen shares and recordings skip them:
+
+- **Google Meet, Microsoft Teams, QuickTime:** nothing to set up.
+- **Zoom:** open **Zoom › Settings › Share Screen › Advanced › Screen capture mode** and choose **Advanced capture with window filtering**. The "without window filtering" mode will show NotchPilot.
+
+This is best effort, not a guarantee. On macOS 15.4 and later, Apple can let some capture tools see it anyway, so test with a practice call before a real one. And a phone camera pointed at your screen can always see it.
 
 ## Requirements
 macOS 14 Sonoma or later. Best on a Mac with a notch; on other Macs it sits at the top center of the screen.

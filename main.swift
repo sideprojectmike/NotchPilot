@@ -4,6 +4,7 @@
 import AppKit
 import AVFoundation
 import PDFKit
+import ScreenCaptureKit
 import Speech
 import SwiftUI
 import UniformTypeIdentifiers
@@ -305,6 +306,10 @@ func pickResumeText() -> String? {
     return resumeText(from: url)
 }
 
+func screenAccessGranted() async -> Bool {
+    (try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)) != nil
+}
+
 func wordCount(_ s: String) -> Int { s.split(whereSeparator: \.isWhitespace).count }
 
 /// Screen Recording only takes effect after a restart, so offer one.
@@ -462,6 +467,7 @@ struct OnboardingView: View {
     @AppStorage("resume") var resume = ""
     @State var step = 0
     @State var key = ""
+    @State var screenOK = false
     let finish: () -> Void
     let pages = 4
 
@@ -497,7 +503,7 @@ struct OnboardingView: View {
             .controlSize(.large)
             .padding(20)
         }
-        .frame(width: 560, height: 480)
+        .frame(width: 560, height: 560)
         .onAppear { key = Keychain.get(provider.rawValue) }
         .onChange(of: provider) { key = Keychain.get(provider.rawValue) }
         .onChange(of: key) { _, v in Keychain.set(provider.rawValue, v) }
@@ -599,9 +605,13 @@ struct OnboardingView: View {
                 VStack(spacing: 10) {
                     PermissionRow(symbol: "rectangle.dashed.badge.record", title: "Screen Recording",
                                   detail: "To read the question on your screen",
-                                  granted: CGPreflightScreenCaptureAccess()) {
-                        CGRequestScreenCaptureAccess()
-                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+                                  granted: screenOK || CGPreflightScreenCaptureAccess()) {
+                        Task {
+                            screenOK = await screenAccessGranted() // asks macOS directly; shows its prompt the first time
+                            if !screenOK {
+                                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+                            }
+                        }
                     }
                     PermissionRow(symbol: "mic.fill", title: "Microphone and Speech Recognition",
                                   detail: "To hear the question when you tap the mic",
@@ -615,6 +625,16 @@ struct OnboardingView: View {
                     }
                 }
             }
+            HStack(spacing: 12) {
+                Image(systemName: "video.fill").font(.title3).foregroundStyle(.tint).frame(width: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Using Zoom?").font(.headline)
+                    Text("Zoom › Settings › Share Screen › Advanced › Screen capture mode: choose \"Advanced capture with window filtering\" so Zoom skips NotchPilot. Meet, Teams, and QuickTime need nothing.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 12).fill(.quaternary.opacity(0.6)))
             HStack {
                 Text("Just turned on Screen Recording? macOS applies it after NotchPilot reopens.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -664,6 +684,7 @@ final class NotchModel: ObservableObject {
     @Published var scrolling = false
     @Published var typing = false
     @Published var draft = ""
+    @Published var attachScreen = false
     var notchWidth: CGFloat = 200, notchHeight: CGFloat = 32
     var openSize: CGSize { CGSize(width: max(420, notchWidth + 240), height: notchHeight + 236) } // narrow enough to leave your menus visible
     let shoulder: CGFloat = 8 // the little outward curve where the panel meets the top of the screen
@@ -787,7 +808,27 @@ struct AskField: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            TextField("Ask anything…", text: $m.draft)
+            Button {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) { m.attachScreen.toggle() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: m.attachScreen ? "macwindow" : "plus")
+                        .font(.system(size: 11, weight: .bold))
+                    if m.attachScreen {
+                        Text("Screen").font(.system(size: 12, weight: .semibold, design: .rounded))
+                        Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).opacity(0.6)
+                    }
+                }
+                .foregroundStyle(m.attachScreen ? Color.black : Color.white.opacity(0.85))
+                .padding(.horizontal, m.attachScreen ? 9 : 0)
+                .frame(minWidth: 24, minHeight: 24)
+                .background(Capsule().fill(m.attachScreen ? Color.white : Color.white.opacity(0.12)))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .help(m.attachScreen ? "Screenshot will be sent with your question. Click to remove." : "Attach a screenshot")
+
+            TextField(m.attachScreen ? "Ask about your screen…" : "Ask anything…", text: $m.draft)
                 .textFieldStyle(.plain)
                 .font(.system(size: 15, weight: .medium, design: .rounded))
                 .foregroundStyle(.white)
@@ -802,7 +843,7 @@ struct AskField: View {
             .buttonStyle(.plain)
             .help("Send (Return)")
         }
-        .padding(.leading, 14).padding(.trailing, 6).padding(.vertical, 6)
+        .padding(.leading, 6).padding(.trailing, 6).padding(.vertical, 6)
         .background(Capsule().fill(.white.opacity(0.1)))
         .overlay(Capsule().strokeBorder(.white.opacity(0.12)))
         .onAppear { focused = true }
@@ -893,7 +934,9 @@ final class Notch: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         UserDefaults.standard.register(defaults: ["speed": 30.0])
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        panel.sharingType = .none // keeps it out of our own screenshots; macOS 15+ ignores this for ScreenCaptureKit (Zoom, Meet)
+        // Marks the window private: Meet, Teams, QuickTime and Zoom's "window filtering" mode skip it (same flag as
+        // Electron's setContentProtection). Best effort: macOS 15.4+ can let some capture tools see it anyway.
+        panel.sharingType = .none
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = false
         // Never set isFloatingPanel: it silently resets this to the floating level, under the menu bar.
         panel.level = .screenSaver // above the menu bar, so the panel grows out of the notch
@@ -1052,41 +1095,51 @@ final class Notch: NSObject, NSApplicationDelegate {
     func sendTyped() {
         let q = m.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
+        let withScreen = m.attachScreen
         m.draft = ""
+        m.attachScreen = false
         withAnimation(.easeOut(duration: 0.15)) { m.typing = false }
-        ask(q, image: nil)
+        guard withScreen else { ask(q, image: nil); return }
+        screenshot { [self] image in
+            guard let image else { return } // you asked for the screen; don't silently send without it
+            ask("My screen is attached. " + q, image: image)
+        }
     }
 
     // MARK: screenshot
-    func screenshot() -> String? {
-        // Without Screen Recording access macOS only lets us capture the wallpaper, not your windows.
-        guard CGPreflightScreenCaptureAccess() else {
-            CGRequestScreenCaptureAccess()
-            m.show("NotchPilot needs Screen Recording to see your windows.\n\nSystem Settings › Privacy & Security › Screen & System Audio Recording: turn on NotchPilot (remove any old NotchPilot entry first), then quit and reopen NotchPilot.")
-            return nil
+    /// ScreenCaptureKit checks permission live (the old CGPreflight check stayed "no" until a relaunch,
+    /// and isn't reliable on newer macOS), and it can leave our own windows out of the shot.
+    func screenshot(_ done: @escaping (String?) -> Void) {
+        Task {
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                guard let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) ?? content.displays.first
+                else { throw CocoaError(.featureUnsupported) }
+                let me = ProcessInfo.processInfo.processIdentifier
+                let filter = SCContentFilter(display: display,
+                                             excludingWindows: content.windows.filter { $0.owningApplication?.processID == me })
+                let cfg = SCStreamConfiguration()
+                cfg.width = 1600 // readable text, and under every provider's image size limit
+                cfg.height = Int(1600 * CGFloat(display.height) / CGFloat(display.width))
+                cfg.showsCursor = false
+                let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
+                let jpeg = NSBitmapImageRep(cgImage: image).representation(using: .jpeg, properties: [.compressionFactor: 0.75])
+                DispatchQueue.main.async { done(jpeg?.base64EncodedString()) }
+            } catch {
+                DispatchQueue.main.async { [self] in
+                    m.show("NotchPilot can't see your screen yet.\n\nIn System Settings › Privacy & Security › Screen & System Audio Recording, turn NotchPilot on. If it's already on, select it, click the minus button to remove it, add it again with plus, then reopen NotchPilot.")
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+                    done(nil)
+                }
+            }
         }
-        let path = NSTemporaryDirectory() + "notchpilot.jpg"
-        try? FileManager.default.removeItem(atPath: path) // never resend an old shot
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        p.arguments = ["-x", "-m", "-t", "jpg", path] // silent, main display only
-        try? p.run(); p.waitUntilExit()
-        // Full Retina shots are several MB, over some providers' image limits. 1600px keeps text readable.
-        let shrink = Process()
-        shrink.executableURL = URL(fileURLWithPath: "/usr/bin/sips")
-        shrink.arguments = ["-Z", "1600", "-s", "formatOptions", "75", path]
-        shrink.standardOutput = FileHandle.nullDevice; shrink.standardError = FileHandle.nullDevice
-        try? shrink.run(); shrink.waitUntilExit()
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)), !data.isEmpty else {
-            m.show("Couldn't take a screenshot. Quit and reopen NotchPilot, then try again.")
-            return nil
-        }
-        return data.base64EncodedString()
     }
 
     func shot() {
-        guard let image = screenshot() else { return }
-        ask("Here's my screen right now. Answer the question or prompt on it for me.", image: image)
+        screenshot { [self] image in
+            guard let image else { return }
+            ask("Here's my screen right now. Answer the question or prompt on it for me.", image: image)
+        }
     }
 
     // MARK: voice
@@ -1139,8 +1192,11 @@ final class Notch: NSObject, NSApplicationDelegate {
         task = nil; request = nil
         m.recording = false
         guard !transcript.isEmpty else { m.status = "Didn't catch that"; return }
-        ask("Here's what was just said (transcribed from my mic): \"\(transcript)\"\nAnswer it for me. My screen is attached for context.",
-            image: screenshot())
+        let said = transcript
+        screenshot { [self] image in
+            ask("Here's what was just said (transcribed from my mic): \"\(said)\"\nAnswer it for me. My screen is attached for context.",
+                image: image)
+        }
     }
 
     // MARK: AI request
